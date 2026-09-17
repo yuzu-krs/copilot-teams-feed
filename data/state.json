@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
-  "last_run_end": "2026-09-17T13:24:33Z",
+  "last_run_end": "2026-09-17T13:58:51Z",
   "published": [
-    "https://github.blog/changelog/2026-09-16-copilot-budget-increase-requests-are-generally-available"
+    "https://github.blog/changelog/2026-09-16-copilot-budget-increase-requests-are-generally-available",
+    "https://github.blog/changelog/2026-09-15-github-copilot-suggests-custom-properties-definitions"
   ],
-  "updated_at": "2026-09-17T13:24:33Z"
+  "updated_at": "2026-09-17T13:58:51Z"
 }
