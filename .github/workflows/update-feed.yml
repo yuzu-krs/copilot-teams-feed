@@ -2,13 +2,13 @@ name: update-feed
 
 on:
   schedule:
-    # 21:50 UTC = 06:50 JST。GitHubのキュー都合で数分遅れることがあるが、
-    # 取得窓は「前回成功実行時刻〜今回実行時刻」なので遅延による取りこ抜しは無い
+    # 21:50 UTC = 06:50 JST。取得窓は「実行時刻の24時間前〜実行時刻」なので、
+    # cronが数分遅れても窓が実行時刻に追従するだけで問題ない
     - cron: "50 21 * * *"
   workflow_dispatch:
     inputs:
       window_start:
-        description: "取得窓の開始時刻(ISO8601 UTC、例: 2026-09-15T00:00:00Z)。空なら通常の連続窓"
+        description: "取得窓の開始時刻(ISO8601 UTC、例: 2026-09-15T00:00:00Z)。空なら直近24時間"
         required: false
         default: ""
 
@@ -46,7 +46,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rss/copilot.xml data/state.json
+          git add rss/copilot.xml
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0

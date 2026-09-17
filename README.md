@@ -7,11 +7,9 @@ Power AutomateがこのRSSを取得し、既存のAIニュースと同じ朝にT
 毎朝 06:50 JST (cron "50 21 * * *" UTC)
   ↓ GitHub Actions
 scripts/build_feed.py
-  1. data/state.json の last_run_end から取得窓を確定
-  2. Changelog RSSを取得し、窓内の新着記事を抽出
-  3. OpenRouter(無料モデル)で日本語タイトル・要約を生成
-  4. rss/copilot.xml を生成
-  5. data/state.json を更新(成功時のみ)
+  1. Changelog RSSを取得し、「実行時刻の24時間前〜実行時刻」に公開された記事を抽出
+  2. OpenRouter(無料モデル)で日本語タイトル・要約を生成
+  3. rss/copilot.xml を生成
   ↓ mainへコミット&push (github-actions[bot])
   ↓ GitHub Pages が自動再ビルド
 https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
@@ -31,49 +29,42 @@ https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
    - Name: `OPENROUTER_API_KEY` / Secret: キーの値
 2. **(任意) モデルチェーンをvariableに登録**
    - 同じページの Variables タブで `OPENROUTER_MODEL` を作成
-   - 値はカンマ区切りのモデルID(例: `z-ai/glm-5.2:free,google/gemma-4-31b-it:free`)。
-     現在の既定は `z-ai/glm-5.2:free` → `google/gemma-4-31b-it:free` →
-     `google/gemma-4-26b-a4b-it:free` → `nvidia/nemotron-3-super-120b-a12b:free` の4本
+   - 値はカンマ区切りのモデルID(例: `z-ai/glm-5.2:free,google/gemma-4-31b-it:free`)
    - 未設定時はコード既定値(`scripts/build_feed.py` の `DEFAULT_MODEL_CHAIN`)が使われる
    - OpenRouterの無料モデルは頻繁に入れ替わるため、LLMが失敗し始めたら
      [無料モデル一覧](https://openrouter.ai/collections/free-models)を確認してここだけ差し替える
-3. **GitHub Pagesを有効化**
-   - Settings → Pages → Source: **Deploy from a branch**
-   - Branch: `main` / `(root)` → Save
+3. **GitHub Pagesを有効化**(設定済み)
+   - Settings → Pages → Source: **Deploy from a branch** / Branch: `main` / `(root)`
 
 ## スケジュール
 
 - GitHub Actionsは `cron: "50 21 * * *"`(**UTC基準**)で毎日1回実行 = **毎朝06:50 JST**
-- GitHubのキュー都合で数分遅れて開始することがあるが、取得窓は実行時刻ベースのため
-  遅延による取りこ抜しは発生しない
+- GitHubのキュー都合で数分遅れて開始することがあるが、取得窓は実行時刻基準なので問題ない
 - 手動実行: Actions → update-feed → **Run workflow**
-  - 任意の `window_start`(ISO8601 UTC)を指定すると、通常の連続窓の代わりに
-    その時刻を窓の開始として再取得できる(LLMの出力が壊れていた時の再生成や
-    障害復旧のテストに使える。既に掲載済みの記事は `published` リストにより
-    重複掲載されない)
+  - 任意の `window_start`(ISO8601 UTC)を指定すると、直近24時間の代わりに
+    その時刻を窓の開始として再取得できる。**実行に失敗した日の記事の取りこ抜しを
+    復旧する場合**や、LLMの出力が壊れていた時の再生成に使う
 
 ## 取得窓の仕組み
 
-**前回成功実行時刻から今回実行時刻までに公開された記事**を取得する
-(`前回成功実行時刻 < 記事のpubDate <= 今回実行時刻`)。
-固定の期間区切り(「前日07:00〜当日07:00」のような)は使わない。
+**実行時刻からさかのぼり24時間以内に公開された記事**を取得する
+(`実行時刻 − 24時間 < 記事のpubDate <= 実行時刻`)。
+毎朝06:50 JSTに実行するので、概ね「前日06:50〜当日06:50」の1日分になる。
 
-- `data/state.json` の `last_run_end` に前回成功実行時刻を保存する
-- **初回**: `last_run_end` が無い場合は直近24時間を取得
-- **成功時**: 今回の実行時刻を `last_run_end` に保存
-- **失敗時**: `last_run_end` は更新しない。次回が同じ窓を再取得するため取りこ抜しが無い
-- Actionsの実行が数分遅延しても、実際の実行時刻までを取得窓に含める
-- 06:50〜07:00に公開された記事は、その日の実行時点では取得できないため、
-  翌日の取得窓に自然に含まれる
+- 履歴ファイル(state等)は**持たない**。1日分だけを常に取得するシンプルな設計
+- 重複排除は guid=記事URL に基づき **Power Automate側の重複排除**に任せる
+  (24時間窓なので同じ記事が2日連続で載ることも基本ない)
 - 記事の判定は取得時刻ではなく、**必ずソースRSSの `pubDate` を基準**にする
 - 内部の窓計算はすべてUTC。RSSに出力する `pubDate` のみJST(+09:00)に変換する
+- **注意**: 実行が失敗した日は、その日の記事が翌日の窓(直近24時間)にも入らず
+  取りこ抜される。気づいたら手動実行の `window_start` で再取得すれば復旧できる
 
 ## RSS仕様
 
-- `guid` は元記事のURL(`isPermaLink="true"`、安定キー)。Power Automate側の
+- `guid` は元記事のURL(`isPermaLink="true"`、安定キー)。Power Automateの
   重複排除はこのguidに依存するため、再実行しても二重投稿されない
-- フィードには**当該窓の記事のみ**を掲載する(過去200件のようなアーカイブではない)
-- **記事が0件の日も正常系**。アイテム0件の有効なRSSを生成し、stateは前進する。
+- フィードには**直近24時間分の記事のみ**を掲載する(アーカイブではない)
+- **記事が0件の日も正常系**。アイテム0件の有効なRSSを生成する。
   Power Automateには新着が無いため通知も行われない
 - `lastBuildDate` はフィード生成時刻(JST)
 
@@ -81,36 +72,10 @@ https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
 
 - OpenRouterの無料モデルで、タイトルは簡潔な日本語に(製品名・機能名は英語のまま)、
   要約は2〜3文(何が変わったか・誰に影響するか)で生成する
-- モデルは `DEFAULT_MODEL_CHAIN` の順に試行。レート制限(429)や一時的な5xxは
-  2段階のバックオフでリトライし、だめなら次のモデルへ
+- モデルは `DEFAULT_MODEL_CHAIN` の順に試行。無料モデルは共有上流のレート制限で
+  429になりやすいため、2/10/30秒のバックオフでリトライし、だめなら次のモデルへ
 - **LLMが全滅した場合・APIキーが未設定の場合**も、英語タイトル+本文抜粋で
   記事を掲載する(記事を落とさない、ジョブも落とさない)
-
-## data/state.json
-
-```json
-{
-  "schema_version": 1,
-  "last_run_end": "2026-09-17T21:50:12Z",
-  "published": ["https://github.blog/changelog/..."],
-  "updated_at": "2026-09-17T21:50:12Z"
-}
-```
-
-- `last_run_end`: 前回成功実行時刻(ISO8601 UTC)。`null` なら初回実行(直近24時間)
-- `published`: 掲載済み記事のguidリスト(上限500、古いものから削除)。
-  窓計算の重複防止のための二重化
-- このファイルは毎日の実行で `github-actions[bot]` により更新・コミットされる(正常な挙動)
-
-### state.jsonの修復
-
-`last_run_end` が破損している等の異常がある場合、スクリプトは**何も書き換えずに
-異常終了**します(24時間へ自動フォールバックすると、通知済みの記事を再取得して
-重複通知する恐れがあるため)。破損時は手動で修復してください:
-
-- 直近の正常なstateに戻す: `git log --oneline -- data/state.json` で直近の正常な
-  コミットを探し、`git checkout <commit> -- data/state.json` で復元してコミット
-- または手でJSONを修正する(壊れたフィールドだけ直す)
 
 ## Power Automate側の設定(リポジトリ外)
 
@@ -130,16 +95,16 @@ Python 3.10+ があれば動作します(標準ライブラリのみ使用)。
 python scripts/build_feed.py --help
 
 # ネットワーク取得せず、保存済みのRSSファイルで試す
-python scripts/build_feed.py --feed-file tmp\feed.xml --state tmp\state.json --out tmp\out.xml
+python scripts/build_feed.py --feed-file tmp\feed.xml --out tmp\out.xml
 
 # 「現在時刻」と「窓の開始」を固定して0件フィードを試す
-python scripts/build_feed.py --feed-file tmp\feed.xml --now 2026-09-17T00:00:00Z --window-start 2026-09-17T00:00:00Z --state tmp\state.json --out tmp\out.xml
+python scripts/build_feed.py --feed-file tmp\feed.xml --now 2026-09-17T00:00:00Z --window-start 2026-09-17T00:00:00Z --out tmp\out.xml
 ```
 
 - `--feed-file`: ネットワークの代わりにファイルからソースRSSを読む
 - `--window-start`: 取得窓の開始時刻を上書き(ISO8601、UTC)
 - `--now`: 現在時刻を上書き(ISO8601、UTC。テスト用)
-- `--state` / `--out`: stateと出力RSSのパス(既定は `data/state.json` / `rss/copilot.xml`)
+- `--out`: 出力RSSのパス(既定は `rss/copilot.xml`)
 
 ローカルで実フィードを試す場合は、先に本物のRSSを保存しておく:
 
@@ -152,6 +117,6 @@ mkdir tmp -Force; curl.exe -sL -o tmp\feed.xml https://github.blog/changelog/lab
 
 ## 注意
 
-- 毎日の実行で `github-actions[bot]` が1コミット作成する(stateとRSSの更新)。正常な挙動
+- 毎日の実行で `github-actions[bot]` が `rss/copilot.xml` を更新・コミットする(正常な挙動)
 - OpenRouterの無料モデルにはレート制限があるが、0〜3件/日の利用では実質問題にならない
 - ソースフィードは https://github.blog/changelog/label/copilot/feed/ (直近約10件)

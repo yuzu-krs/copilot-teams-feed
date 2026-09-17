@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Build rss/copilot.xml from the GitHub Copilot changelog feed.
 
-取得窓は「前回成功実行時刻 < 記事のpubDate <= 今回実行時刻」の連続窓。
-data/state.json の last_run_end に前回成功実行時刻を保存する。
+取得窓は「実行時刻の24時間前 < 記事のpubDate <= 実行時刻」。
+毎朝06:50 JSTに実行するので、概ね「前日06:50〜当日06:50」の1日分となる。
 
-- 初回(state.jsonが存在しない): 直近24時間を取得
-- 成功時: 今回の実行時刻を last_run_end に保存
-- 失敗時: last_run_end を更新しない(次回が同じ窓を再取得)
-- state.json が破損している場合は exit 1。24時間への自動フォールバックは
-  通知済み記事の重複通知を招くため行わない(手動修復が必要)
+- stateファイル等の履歴は持たない。同じ記事が複数回フィードに載っても
+  Power Automate側の重複排除(guid=記事URL)が効くため問題ない
+- 実行に失敗した日は、その日の記事が翌日の窓にも入らないため取りこ抜される
+  可能性がある。その場合は手動実行時に --window-start を指定して再取得する
 - 記事の判定は必ずソースRSSの pubDate を基準にする(内部はUTC、出力はJST)
 
 Python 3.10+ 標準ライブラリのみで動作する。
@@ -33,7 +32,6 @@ FEED_URL = "https://github.blog/changelog/label/copilot/feed/"
 SOURCE_LINK = "https://github.blog/changelog/label/copilot/"
 PAGES_FEED_URL = "https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml"
 
-STATE_PATH = "data/state.json"
 RSS_PATH = "rss/copilot.xml"
 
 # 日本はDSTが無いので固定オフセットで十分(zoneinfoはWindowsのローカル環境で
@@ -52,10 +50,9 @@ DEFAULT_MODEL_CHAIN = (
     "nvidia/nemotron-3-super-120b-a12b:free"
 )
 
-SCHEMA_VERSION = 1
-PUBLISHED_CAP = 500
 FETCH_TIMEOUT = 30
 LLM_TIMEOUT = 90
+WINDOW_HOURS = 24
 WARN_WINDOW_DAYS = 7
 EXCERPT_LIMIT = 1500
 FALLBACK_SUMMARY_LIMIT = 200
@@ -73,107 +70,6 @@ class Article:
     pub: datetime  # aware UTC
     description_html: str
     content_html: str
-
-
-class StateError(Exception):
-    """state.json が破損している(手動修復が必要)。"""
-
-
-# ---------------------------------------------------------------- state ----
-
-def _fresh_state() -> dict:
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "last_run_end": None,
-        "published": [],
-        "updated_at": None,
-    }
-
-
-def _parse_iso8601_utc(value: str) -> datetime:
-    """ISO8601文字列をaware UTC datetimeへ。解析不能ならValueError。"""
-    text = value.strip()
-    if text.endswith(("Z", "z")):
-        text = text[:-1] + "+00:00"
-    dt = datetime.fromisoformat(text)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
-
-
-def _iso(dt: datetime) -> str:
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def load_state(path: str) -> dict:
-    """state.jsonを読み込む。
-
-    - ファイルが存在しない -> 初回実行としてデフォルト値を返す
-    - 破損(JSON解析不能・必須フィールド欠損・不正な値) -> StateError
-      (24時間へフォールバックすると通知済み記事を再取得して重複通知に
-       なるため、自動フォールバックはしない)
-    """
-    if not os.path.exists(path):
-        log(f"state file not found: {path} -> first run (last 24h window)")
-        return _fresh_state()
-
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = f.read()
-    except OSError as e:
-        raise StateError(f"cannot read state file {path}: {e}") from e
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise StateError(
-            f"state file {path} is corrupted (invalid JSON: {e}). "
-            "Manual repair required."
-        ) from e
-
-    if not isinstance(data, dict):
-        raise StateError(f"state file {path} is corrupted: top level must be an object")
-
-    problems = []
-    if data.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"schema_version must be {SCHEMA_VERSION}, got {data.get('schema_version')!r}")
-
-    last_run_end = data.get("last_run_end", "")
-    if last_run_end is None:
-        pass  # 初回実行相当
-    elif isinstance(last_run_end, str):
-        try:
-            _parse_iso8601_utc(last_run_end)
-        except ValueError as e:
-            problems.append(f"last_run_end is not a valid ISO8601 UTC value: {e}")
-    else:
-        problems.append(f"last_run_end must be a string or null, got {type(last_run_end).__name__}")
-
-    published = data.get("published")
-    if not isinstance(published, list) or not all(isinstance(g, str) for g in published):
-        problems.append("published must be a list of strings")
-
-    if problems:
-        raise StateError(
-            f"state file {path} is corrupted ({'; '.join(problems)}). Manual repair required."
-        )
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "last_run_end": None if last_run_end is None else _parse_iso8601_utc(last_run_end),
-        "published": list(published),
-        "updated_at": data.get("updated_at"),
-    }
-
-
-def new_state(prev: dict, now: datetime, new_guids: list[str]) -> dict:
-    published = (prev["published"] + new_guids)[-PUBLISHED_CAP:]
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "last_run_end": _iso(now),
-        "published": published,
-        "updated_at": _iso(now),
-    }
 
 
 # --------------------------------------------------------- fetch / parse ----
@@ -278,19 +174,13 @@ def clean_excerpt(html_text: str, limit: int = EXCERPT_LIMIT) -> str:
 
 # ---------------------------------------------------- window / selection ----
 
-def window_bounds(state: dict, now: datetime) -> tuple[datetime, datetime]:
-    start = state["last_run_end"] or (now - timedelta(hours=24))
-    end = now
-    if start >= end:
-        start = end
-    return start, end
+def window_bounds(now: datetime) -> tuple[datetime, datetime]:
+    return now - timedelta(hours=WINDOW_HOURS), now
 
 
-def select_articles(
-    articles: list[Article], start: datetime, end: datetime, published: set[str]
-) -> list[Article]:
-    """窓内(start < pub <= end)かつ未掲載の記事を古い順で返す。"""
-    selected = [a for a in articles if start < a.pub <= end and a.guid not in published]
+def select_articles(articles: list[Article], start: datetime, end: datetime) -> list[Article]:
+    """窓内(start < pub <= end)の記事を古い順で返す。"""
+    selected = [a for a in articles if start < a.pub <= end]
     selected.sort(key=lambda a: a.pub)
     return selected
 
@@ -450,14 +340,24 @@ def build_rss(items: list[tuple[Article, str, str]], built_at: datetime) -> byte
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build the daily Copilot changelog RSS feed (continuous window)."
+        description="Build the daily Copilot changelog RSS feed (24h window ending at run time)."
     )
     parser.add_argument("--feed-file", help="read the source RSS from a file instead of the network")
     parser.add_argument("--window-start", help="override the window start (ISO8601, UTC)")
     parser.add_argument("--now", help="override the current time for testing (ISO8601, UTC)")
-    parser.add_argument("--state", default=STATE_PATH, help=f"state file path (default: {STATE_PATH})")
     parser.add_argument("--out", default=RSS_PATH, help=f"output RSS path (default: {RSS_PATH})")
     return parser.parse_args(argv)
+
+
+def _parse_iso8601_utc(value: str) -> datetime:
+    """ISO8601文字列をaware UTC datetimeへ。解析不能ならValueError。"""
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _parse_iso_arg(value: str, flag: str) -> datetime:
@@ -465,6 +365,10 @@ def _parse_iso_arg(value: str, flag: str) -> datetime:
         return _parse_iso8601_utc(value)
     except ValueError:
         raise SystemExit(f"ERROR: invalid ISO8601 value for {flag}: {value!r}")
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -477,7 +381,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     try:
-        state = load_state(args.state)
         now = _parse_iso_arg(args.now, "--now") if args.now else datetime.now(UTC)
 
         if args.feed_file:
@@ -487,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
             data = fetch_feed(FEED_URL)
         articles = parse_feed(data)
 
-        window_start, window_end = window_bounds(state, now)
+        window_start, window_end = window_bounds(now)
         if args.window_start:
             window_start = _parse_iso_arg(args.window_start, "--window-start")
             if window_start >= window_end:
@@ -501,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"window: ({_iso(window_start)} .. {_iso(window_end)}] "
             f"[{window_start.astimezone(JST):%Y-%m-%d %H:%M} JST .. {window_end.astimezone(JST):%Y-%m-%d %H:%M} JST]")
 
-        selected = select_articles(articles, window_start, window_end, set(state["published"]))
+        selected = select_articles(articles, window_start, window_end)
         log(f"articles in feed: {len(articles)}, selected: {len(selected)}")
 
         api_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or None
@@ -520,32 +423,16 @@ def main(argv: list[str] | None = None) -> int:
             items.append((article, ja_title, ja_summary))
 
         xml_bytes = build_rss(items, now)
-        state_out = new_state(state, now, [a.guid for a in selected])
 
         # ここまで全て成功した場合にのみ書き込む(失敗時は何も書き換えない)
-        for path in (args.out, args.state):
-            directory = os.path.dirname(path)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
+        directory = os.path.dirname(args.out)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         with open(args.out, "wb") as f:
             f.write(xml_bytes)
-        with open(args.state, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(state_out, f, ensure_ascii=False, indent=2)
-            f.write("\n")
 
         log(f"wrote {args.out} ({len(items)} items)")
-        log(f"state updated: last_run_end={state_out['last_run_end']}, "
-            f"published={len(state_out['published'])} guids")
         return 0
-    except StateError as e:
-        print(
-            f"ERROR: {e}\n"
-            "ERROR: data/state.json が破損しています。自動修復は行いません"
-            "(直近24時間へフォールバックすると通知済みの記事を重複通知する恐れがあります)。\n"
-            "ERROR: 手動修復が必要です。READMEの「state.jsonの修復」を参照してください。",
-            file=sys.stderr,
-        )
-        return 1
     except ET.ParseError as e:
         print(f"ERROR: failed to parse the source feed XML: {e}", file=sys.stderr)
         return 1
