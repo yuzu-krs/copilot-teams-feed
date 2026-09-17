@@ -45,6 +45,10 @@ https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
 - GitHubのキュー都合で数分遅れて開始することがあるが、取得窓は実行時刻ベースのため
   遅延による取りこ抜しは発生しない
 - 手動実行: Actions → update-feed → **Run workflow**
+  - 任意の `window_start`(ISO8601 UTC)を指定すると、通常の連続窓の代わりに
+    その時刻を窓の開始として再取得できる(LLMの出力が壊れていた時の再生成や
+    障害復旧のテストに使える。既に掲載済みの記事は `published` リストにより
+    重複掲載されない)
 
 ## 取得窓の仕組み
 

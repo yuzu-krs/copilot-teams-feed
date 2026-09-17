@@ -5,7 +5,12 @@ on:
     # 21:50 UTC = 06:50 JST。GitHubのキュー都合で数分遅れることがあるが、
     # 取得窓は「前回成功実行時刻〜今回実行時刻」なので遅延による取りこ抜しは無い
     - cron: "50 21 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      window_start:
+        description: "取得窓の開始時刻(ISO8601 UTC、例: 2026-09-15T00:00:00Z)。空なら通常の連続窓"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -29,7 +34,13 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
-        run: python scripts/build_feed.py
+          WINDOW_START: ${{ inputs.window_start }}
+        run: |
+          if [ -n "$WINDOW_START" ]; then
+            python scripts/build_feed.py --window-start "$WINDOW_START"
+          else
+            python scripts/build_feed.py
+          fi
 
       - name: Commit and push
         run: |
