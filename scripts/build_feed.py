@@ -42,9 +42,15 @@ UTC = timezone.utc
 JST = timezone(timedelta(hours=9), "JST")
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-# 無料モデルは頻繁に入れ替わる。廃止された場合は repo variable
-# OPENROUTER_MODEL で差し替えるか、この既定値を更新する
-DEFAULT_MODEL_CHAIN = "z-ai/glm-5.2:free,google/gemma-4-31b-it:free"
+# 無料モデルは共有上流のレート制限で429になりやすいため、複数モデルを
+# 順に試す。廃止された場合は repo variable OPENROUTER_MODEL で差し替えるか、
+# この既定値を更新する(https://openrouter.ai/collections/free-models)
+DEFAULT_MODEL_CHAIN = (
+    "z-ai/glm-5.2:free,"
+    "google/gemma-4-31b-it:free,"
+    "google/gemma-4-26b-a4b-it:free,"
+    "nvidia/nemotron-3-super-120b-a12b:free"
+)
 
 SCHEMA_VERSION = 1
 PUBLISHED_CAP = 500
@@ -324,7 +330,7 @@ def call_openrouter(model: str, user_prompt: str, api_key: str) -> str:
         "HTTP-Referer": "https://github.com/yuzu-krs/copilot-teams-feed",
         "X-Title": "copilot-teams-feed",
     }
-    delays = (2, 8)
+    delays = (2, 10, 30)
     last_error: Exception | None = None
     for attempt in range(len(delays) + 1):
         if attempt:

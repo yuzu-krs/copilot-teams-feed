@@ -31,7 +31,9 @@ https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
    - Name: `OPENROUTER_API_KEY` / Secret: キーの値
 2. **(任意) モデルチェーンをvariableに登録**
    - 同じページの Variables タブで `OPENROUTER_MODEL` を作成
-   - 値はカンマ区切りのモデルID(例: `z-ai/glm-5.2:free,google/gemma-4-31b-it:free`)
+   - 値はカンマ区切りのモデルID(例: `z-ai/glm-5.2:free,google/gemma-4-31b-it:free`)。
+     現在の既定は `z-ai/glm-5.2:free` → `google/gemma-4-31b-it:free` →
+     `google/gemma-4-26b-a4b-it:free` → `nvidia/nemotron-3-super-120b-a12b:free` の4本
    - 未設定時はコード既定値(`scripts/build_feed.py` の `DEFAULT_MODEL_CHAIN`)が使われる
    - OpenRouterの無料モデルは頻繁に入れ替わるため、LLMが失敗し始めたら
      [無料モデル一覧](https://openrouter.ai/collections/free-models)を確認してここだけ差し替える
