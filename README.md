@@ -14,7 +14,7 @@ scripts/build_feed.py
   ↓ GitHub Pages が自動再ビルド
 https://yuzu-krs.github.io/copilot-teams-feed/rss/copilot.xml
   ↓ Power Automate (毎朝07:00にフィード取得 → 記事があればTeamsへ投稿)
-  ↓ Teams AI Lab へ通知
+  ↓ Teams の指定チャネルへ通知
 ```
 
 ## 公開URL
@@ -100,7 +100,7 @@ RSSトリガーではなくスケジュール実行+フィード取得方式な�
 4. **「はい」側: 「各自に適用」(Apply to each)**
    - 入力: 「すべてのRSSフィードアイテムを一覧表示」の出力(value)
    - その中で **「Teams」→「チャットまたはチャネルでカードを投稿」**
-     - 投稿者: `Bot` / 投稿先: `チャネル` / チャネル: AI Labのチャネル
+     - 投稿者: `Bot` / 投稿先: `チャネル` / チャネル: 通知先の社内チャネルを選択
      - 見出し(Headline) と 概要(Summary) は下記フォーマット参照
 5. **「いいえ」側(0件の日)**: 何も置かない(= 投稿なしで終了)。
    「本日のCopilotの更新はありません」と毎日通知したい場合は、ここに投稿アクションを置く
