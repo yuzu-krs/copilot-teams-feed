@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Build rss/copilot.xml from the GitHub Copilot changelog feed.
 
-取得窓は「前日0:00〜当日0:00(日本時間)」= 日本時間の暦で**昨日1日分**。
-毎朝06:50 JSTに実行し、その日の朝にPower Automate経由でTeamsへ届く。
+取得窓は「前日0:00〜当日0:00(UTC/米国時間)」= 米国時間の暦で**前日1日分**。
+毎朝06:50 JST(= UTC 21:50)に実行するので、日本時間X日の朝の実行では
+UTCの(X-2)日分を取得する(例: 9/18 06:50 JSTの実行 → UTC 9/16分)。
+実行時点で対象日の窓はすでに終了している(締め切り済み)ため漏れがない。
+Changelogサイトの日付表記も米国時間ベースなので、表示と対象日が一致する。
 
 - stateファイル等の履歴は持たない。同じ記事が複数回フィードに載っても
   Power Automate側の重複排除(guid=記事URL)が効くため問題ない
 - 実行に失敗した日はその分が丸ごと飛ぶ。手動実行時に --window-start で
-  該当日の0:00 JSTを指定すれば再取得できる
-- Changelogサイトの日付表記(Sep.16など)は米国時間だが、判定は記事の
-  pubDate を正しくJST変換して行うためずれは生じない
+  該当日の0:00 UTCを指定すれば再取得できる
 - 記事の判定は必ずソースRSSの pubDate を基準にする(内部はUTC、出力はJST)
 
 Python 3.10+ 標準ライブラリのみで動作する。
@@ -176,9 +177,9 @@ def clean_excerpt(html_text: str, limit: int = EXCERPT_LIMIT) -> str:
 # ---------------------------------------------------- window / selection ----
 
 def window_bounds(now: datetime) -> tuple[datetime, datetime]:
-    """日本時間の暦で「前日0:00〜当日0:00」(昨日1日分)を返す。"""
-    today_start_jst = now.astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
-    return today_start_jst - timedelta(days=1), today_start_jst
+    """UTC暦で「前日0:00〜当日0:00」(= 完了済みの最新のUTC1日分)を返す。"""
+    today_start_utc = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return today_start_utc - timedelta(days=1), today_start_utc
 
 
 def select_articles(articles: list[Article], start: datetime, end: datetime) -> list[Article]:
@@ -316,7 +317,7 @@ def build_rss(items: list[tuple[Article, str, str]], built_at: datetime) -> byte
     ET.SubElement(channel, "title").text = "GitHub Copilot Changelog(日本語まとめ)"
     ET.SubElement(channel, "link").text = SOURCE_LINK
     ET.SubElement(channel, "description").text = (
-        "GitHub Copilotの変更履歴を毎日日本語にまとめたフィードです"
+        "GitHub Copilotの変更履歴を毎日日本語にまとめたフィードです(対象は米国時間基準の前日分)"
     )
     ET.SubElement(channel, "language").text = "ja"
     ET.SubElement(channel, "lastBuildDate").text = format_datetime(built_at.astimezone(JST))
