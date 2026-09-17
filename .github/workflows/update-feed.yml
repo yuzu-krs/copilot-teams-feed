@@ -2,13 +2,13 @@ name: update-feed
 
 on:
   schedule:
-    # 21:50 UTC = 06:50 JST。取得窓は「実行時刻の24時間前〜実行時刻」なので、
-    # cronが数分遅れても窓が実行時刻に追従するだけで問題ない
+    # 21:50 UTC = 06:50 JST。取得窓は「前日0:00〜当日0:00(日本時間)」= 昨日1日分。
+    # 暦日で固定されるため、cronが数分遅れても窓は変わらない
     - cron: "50 21 * * *"
   workflow_dispatch:
     inputs:
       window_start:
-        description: "取得窓の開始時刻(ISO8601 UTC、例: 2026-09-15T00:00:00Z)。空なら直近24時間"
+        description: "取得窓の開始時刻(ISO8601 UTC、例: 2026-09-15T00:00:00Z)。空なら昨日1日分(前日0:00〜当日0:00 JST)"
         required: false
         default: ""
 

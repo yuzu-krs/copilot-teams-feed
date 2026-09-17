@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Build rss/copilot.xml from the GitHub Copilot changelog feed.
 
-取得窓は「実行時刻の24時間前 < 記事のpubDate <= 実行時刻」。
-毎朝06:50 JSTに実行するので、概ね「前日06:50〜当日06:50」の1日分となる。
+取得窓は「前日0:00〜当日0:00(日本時間)」= 日本時間の暦で**昨日1日分**。
+毎朝06:50 JSTに実行し、その日の朝にPower Automate経由でTeamsへ届く。
 
 - stateファイル等の履歴は持たない。同じ記事が複数回フィードに載っても
   Power Automate側の重複排除(guid=記事URL)が効くため問題ない
-- 実行に失敗した日は、その日の記事が翌日の窓にも入らないため取りこ抜される
-  可能性がある。その場合は手動実行時に --window-start を指定して再取得する
+- 実行に失敗した日はその分が丸ごと飛ぶ。手動実行時に --window-start で
+  該当日の0:00 JSTを指定すれば再取得できる
+- Changelogサイトの日付表記(Sep.16など)は米国時間だが、判定は記事の
+  pubDate を正しくJST変換して行うためずれは生じない
 - 記事の判定は必ずソースRSSの pubDate を基準にする(内部はUTC、出力はJST)
 
 Python 3.10+ 標準ライブラリのみで動作する。
@@ -52,7 +54,6 @@ DEFAULT_MODEL_CHAIN = (
 
 FETCH_TIMEOUT = 30
 LLM_TIMEOUT = 90
-WINDOW_HOURS = 24
 WARN_WINDOW_DAYS = 7
 EXCERPT_LIMIT = 1500
 FALLBACK_SUMMARY_LIMIT = 200
@@ -175,7 +176,9 @@ def clean_excerpt(html_text: str, limit: int = EXCERPT_LIMIT) -> str:
 # ---------------------------------------------------- window / selection ----
 
 def window_bounds(now: datetime) -> tuple[datetime, datetime]:
-    return now - timedelta(hours=WINDOW_HOURS), now
+    """日本時間の暦で「前日0:00〜当日0:00」(昨日1日分)を返す。"""
+    today_start_jst = now.astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
+    return today_start_jst - timedelta(days=1), today_start_jst
 
 
 def select_articles(articles: list[Article], start: datetime, end: datetime) -> list[Article]:
@@ -340,7 +343,7 @@ def build_rss(items: list[tuple[Article, str, str]], built_at: datetime) -> byte
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build the daily Copilot changelog RSS feed (24h window ending at run time)."
+        description="Build the daily Copilot changelog RSS feed (yesterday's JST calendar day)."
     )
     parser.add_argument("--feed-file", help="read the source RSS from a file instead of the network")
     parser.add_argument("--window-start", help="override the window start (ISO8601, UTC)")
