@@ -1,0 +1,44 @@
+name: update-feed
+
+on:
+  schedule:
+    # 21:50 UTC = 06:50 JST。GitHubのキュー都合で数分遅れることがあるが、
+    # 取得窓は「前回成功実行時刻〜今回実行時刻」なので遅延による取りこ抜しは無い
+    - cron: "50 21 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-feed
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build feed
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+        run: python scripts/build_feed.py
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rss/copilot.xml data/state.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update feed (run $GITHUB_RUN_ID)"
+          git push
