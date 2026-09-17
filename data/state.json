@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
-  "last_run_end": null,
-  "published": [],
-  "updated_at": null
+  "last_run_end": "2026-09-17T13:24:33Z",
+  "published": [
+    "https://github.blog/changelog/2026-09-16-copilot-budget-increase-requests-are-generally-available"
+  ],
+  "updated_at": "2026-09-17T13:24:33Z"
 }
